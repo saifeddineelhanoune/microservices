@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # Databases
+  postgres:
+    image: postgres:14-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ecommerce_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:4.4
+    container_name: mongo_db
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:6.2-alpine
+    container_name: redis_pubsub
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Microservices
+  user-service:
+    build:
+      context: ../../microservices/user-service
+      dockerfile: Dockerfile
+    container_name: user-service
+    environment:
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: ecommerce_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  product-service:
+    build:
+      context: ../../microservices/product-service
+      dockerfile: Dockerfile
+    container_name: product-service
+    environment:
+      PORT: 8080
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB_NAME: ecommerce
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  order-service:
+    build:
+      context: ../../microservices/order-service
+      dockerfile: Dockerfile
+    container_name: order-service
+    environment:
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: user
+      DB_PASSWORD: password
+      DB_NAME: ecommerce_db
+      REDIS_ADDR: redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  payment-service:
+    build:
+      context: ../../microservices/payment-service
+      dockerfile: Dockerfile
+    container_name: payment-service
+    environment:
+      PORT: 8080
+      REDIS_ADDR: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # Frontend/API Gateway
+  api-gateway:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    ports:
+      - "80:80"
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+      - payment-service
+
+volumes:
+  postgres_data:
+  mongo_data:
